@@ -28,11 +28,11 @@ from rich.table import Table
 # Allow `python demo/cli_app.py` from the package root.
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 PROJECT_PARENT = PACKAGE_ROOT.parent
-if str(PROJECT_PARENT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_PARENT))
+if str(PACKAGE_ROOT) not in sys.path:
+    sys.path.insert(0, str(PACKAGE_ROOT))
 
-from hydradb_plus.pipeline.unified_pipeline import HydraDBPlusPlus
-from hydradb_plus.benchmarks.run_benchmarks import (
+from pipeline.unified_pipeline import HydraDBPlusPlus
+from benchmarks.run_benchmarks import (
     benchmark_graph_pruning,
     benchmark_graph_pruning_scale,
     benchmark_poison_defense,

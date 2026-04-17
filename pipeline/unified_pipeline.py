@@ -87,7 +87,7 @@ class HydraDBPlusPlus:
         llm_model: str = DEFAULT_LLM_MODEL,
         ingest_prune_every: int = 100,
     ) -> None:
-        """Initialize the full HydraDB++ pipeline."""
+        """Initialize the full Hydra++ pipeline."""
 
         self.graph = KnowledgeGraph()
         self.temporal = TemporalEngine()
@@ -105,6 +105,18 @@ class HydraDBPlusPlus:
         self._ingest_prune_every = int(ingest_prune_every)
         self._ingest_count = 0
         self.current_user = "user"
+
+    def _load_prompt(self, filename: str) -> str:
+        """Load a prompt from the prompts directory."""
+        # Calculate base path relative to this file's location (pipeline/unified_pipeline.py)
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        prompt_path = os.path.join(base_dir, "prompts", filename)
+        
+        if not os.path.exists(prompt_path):
+            return ""
+            
+        with open(prompt_path, "r", encoding="utf-8") as f:
+            return f.read()
 
     def _llm_available(self) -> bool:
         """Check whether an LLM API key is likely configured."""
@@ -255,30 +267,12 @@ class HydraDBPlusPlus:
 
             return {"entities": entities_unique, "relations": relations, "facts": facts, "temporal_refs": []}
 
-        # Attempt LLM extraction with an aggressive prompt.
-        prompt = (
-            "You are an aggressive information extraction engine for a memory knowledge graph.\n"
-            "Extract EVERY entity, technology, person, place, preference, and action from the text.\n"
-            "Be thorough — aim for 5-10 entities per sentence.\n\n"
-            f"TEXT:\n{text}\n\n"
-            "Return ONLY a valid JSON object with these exact keys:\n"
-            "{\n"
-            '  "entities": ["entity1", "entity2", ...],\n'
-            '  "facts": ["subject VERB object", ...],\n'
-            '  "relations": [\n'
-            '    {"from_entity": "A", "to_entity": "B", "relation": "USES|LIKES|WORKS_AT|LIVES_IN|BUILDS|HAS_NAME|HAS_PREFERENCE|MENTIONS", "value": "B"},\n'
-            '    ...\n'
-            '  ],\n'
-            '  "temporal_refs": []\n'
-            "}\n\n"
-            "Example — for text 'Alice loves TypeScript and builds React SaaS apps':\n"
-            '{"entities": ["Alice", "TypeScript", "React", "SaaS", "apps"], '
-            '"facts": ["Alice LOVES TypeScript", "Alice BUILDS React SaaS apps"], '
-            '"relations": [{"from_entity": "Alice", "to_entity": "TypeScript", "relation": "LIKES", "value": "TypeScript"}, '
-            '{"from_entity": "Alice", "to_entity": "React", "relation": "BUILDS", "value": "React"}], '
-            '"temporal_refs": []}\n'
-            "Output ONLY the JSON. No explanation, no markdown fences."
-        )
+        # Attempt LLM extraction with an aggressive prompt from external file.
+        prompt_template = self._load_prompt("prompt.md")
+        if not prompt_template:
+            return _heuristic()
+            
+        prompt = prompt_template.format(text=text)
         llm_text = self._safe_completion(prompt, max_tokens=800)
         if llm_text:
             try:
@@ -547,13 +541,10 @@ class HydraDBPlusPlus:
             # Step 1: Query expansion (3 variants)
             variants: List[str] = []
             if self._llm_available():
-                prompt = (
-                    "Generate exactly 3 alternative search queries for the question below. "
-                    "Return JSON with key 'queries' as a list of 3 strings. "
-                    "Question: "
-                    f"{question}\n"
-                )
-                llm = self._safe_completion(prompt, max_tokens=200)
+                prompt_template = self._load_prompt("query_expansion.md")
+                if prompt_template:
+                    prompt = prompt_template.format(question=question)
+                    llm = self._safe_completion(prompt, max_tokens=200)
                 if llm:
                     try:
                         obj = json.loads(llm)
@@ -656,19 +647,15 @@ class HydraDBPlusPlus:
             answer = ""
             base_confidence = reranked_sorted[0][1] if reranked_sorted else 0.0
             if self._llm_available():
-                prompt = (
-                    "IMPORTANT FACTS (always trust these):\n"
-                    f"{formatted_graph_facts}\n\n"
-                    "Additional context:\n"
-                    f"{vector_chunk_text}\n\n"
-                    "Sentiment:\n"
-                    f"{sentiment_text}\n\n"
-                    f"Question: {question}\n\n"
-                    "Answer using IMPORTANT FACTS first.\n"
-                    "If name/location asked, use IMPORTANT FACTS only.\n"
-                    "If not found in context, say you don't know."
-                )
-                llm_answer = self._call_llm(prompt, max_tokens=250)
+                prompt_template = self._load_prompt("query_answer.md")
+                if prompt_template:
+                    prompt = prompt_template.format(
+                        formatted_graph_facts=formatted_graph_facts,
+                        vector_chunk_text=vector_chunk_text,
+                        sentiment_text=sentiment_text,
+                        question=question
+                    )
+                    llm_answer = self._call_llm(prompt, max_tokens=250)
                 if llm_answer:
                     answer = llm_answer.strip()
                 else:
